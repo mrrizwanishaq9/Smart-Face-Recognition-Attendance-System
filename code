@@ -1,0 +1,1081 @@
+# ============================================================
+# FACE RECOGNITION + STUDENT DETAILS + ATTENDANCE
+# GOOGLE COLAB - COMPLETE SINGLE CELL
+# WITH CAMERA ERROR HANDLING
+# ============================================================
+# 1. INSTALL LIBRARIES
+# ------------------------------------------------------------
+!pip install face-recognition opencv-python-headless -q
+# ------------------------------------------------------------
+# 2. IMPORTS
+# ------------------------------------------------------------
+import cv2
+import face_recognition
+import numpy as np
+import os
+import csv
+import json
+import time
+
+from datetime import datetime
+from base64 import b64decode
+
+from google.colab.output import eval_js
+from IPython.display import display, Javascript
+from google.colab import files
+from google.colab.patches import cv2_imshow
+
+import pandas as pd
+# 3. PROJECT FILES
+# ------------------------------------------------------------
+FACE_FOLDER = "student_faces"
+DATABASE_FILE = "students.json"
+ATTENDANCE_FILE = "attendance.csv"
+os.makedirs(FACE_FOLDER, exist_ok=True)
+# 4. HEADER
+# ------------------------------------------------------------
+print("=" * 65)
+print("       FACE RECOGNITION STUDENT ATTENDANCE")
+print("=" * 65)
+print("""
+This educational system can:
+✓ Detect faces
+✓ Recognize registered students
+✓ Show Name
+✓ Show Student ID
+✓ Show Department
+✓ Mark attendance
+✓ Save attendance in CSV
+NOTE:
+A person must first be registered in the local database.
+Unknown people will NOT have their personal details
+automatically discovered.
+""")
+# 5. LOAD EXISTING DATABASE
+# ------------------------------------------------------------
+if os.path.exists(DATABASE_FILE):
+    try:
+        with open(
+            DATABASE_FILE,
+            "r",
+            encoding="utf-8"
+        ) as f:
+            students = json.load(f)
+    except:
+        students = {}
+else:
+    students = {}
+# 6. REGISTER NEW STUDENT
+# ------------------------------------------------------------
+print("\n" + "=" * 65)
+print("REGISTER NEW STUDENT")
+print("=" * 65)
+print("\nEnter student information.")
+name = input("Student Name: ").strip()
+student_id = input("Student ID: ").strip()
+department = input("Department: ").strip()
+#  CHECK ID
+# ------------------------------------------------------------
+if student_id == "":
+    raise Exception("Student ID cannot be empty.")
+if name == "":
+    raise Exception("Student name cannot be empty.")
+if department == "":
+    raise Exception("Department cannot be empty.")
+# UPLOAD STUDENT PHOTO
+# ------------------------------------------------------------
+print("\nUpload ONE clear photo of the student.")
+print("The photo should contain one face only.")
+uploaded = files.upload()
+if len(uploaded) == 0:
+    raise Exception(
+        "No photo was uploaded."
+    )
+uploaded_filename = list(
+    uploaded.keys()
+)[0]
+# SAVE PHOTO
+# ------------------------------------------------------------
+photo_path = os.path.join(
+    FACE_FOLDER,
+    student_id + ".jpg"
+)
+with open(
+    photo_path,
+    "wb"
+) as f:
+    f.write(
+        uploaded[uploaded_filename]
+    )
+
+# CHECK FACE
+# ------------------------------------------------------------
+print("\nChecking uploaded photo...")
+registered_image = (
+    face_recognition.load_image_file(
+        photo_path
+    )
+)
+registered_faces = (
+    face_recognition.face_encodings(
+        registered_image
+    )
+)
+if len(registered_faces) == 0:
+    os.remove(photo_path)
+    raise Exception(
+        "No face detected in the uploaded photo. "
+        "Please upload a clear face photo."
+    )
+if len(registered_faces) > 1:
+    print(
+        "WARNING: Multiple faces detected. "
+        "Using the first detected face."
+    )
+# SAVE STUDENT RECORD
+# ------------------------------------------------------------
+students[student_id] = {
+    "name": name,
+    "student_id": student_id,
+    "department": department,
+    "photo": photo_path
+}
+with open(
+    DATABASE_FILE,
+    "w",
+    encoding="utf-8"
+) as f:
+    json.dump(
+        students,
+        f,
+        indent=4
+    )
+print("\n" + "-" * 65)
+print("STUDENT REGISTERED SUCCESSFULLY")
+print("-" * 65)
+
+print("Name       :", name)
+print("Student ID :", student_id)
+print("Department :", department)
+# 7. CREATE ATTENDANCE FILE
+# ------------------------------------------------------------
+if not os.path.exists(
+    ATTENDANCE_FILE
+):
+    with open(
+        ATTENDANCE_FILE,
+        "w",
+        newline="",
+        encoding="utf-8"
+    ) as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "Name",
+            "Student ID",
+            "Department",
+            "Date",
+            "Time",
+            "Status"
+        ])
+# 8. LOAD ALL REGISTERED FACES
+# ------------------------------------------------------------
+print("\nLoading registered students...")
+known_encodings = []
+known_students = []
+for student_id, student in students.items():
+    photo = student.get(
+        "photo"
+    )
+    if not photo:
+        continue
+    if not os.path.exists(photo):
+        continue
+    try:
+        image = (
+            face_recognition.load_image_file(
+                photo
+            )
+        )
+        encodings = (
+            face_recognition.face_encodings(
+                image
+            )
+        )
+        if len(encodings) > 0:
+            known_encodings.append(
+                encodings[0]
+            )
+            known_students.append(
+                student
+            )
+            print(
+                "Loaded:",
+                student["name"],
+                "|",
+                student["student_id"]
+            )
+    except Exception as e:
+        print(
+            "Could not load:",
+            student["name"]
+        )
+print(
+    "\nTotal registered students:",
+    len(known_students)
+)
+# ------------------------------------------------------------
+# 9. ATTENDANCE FUNCTION
+# ------------------------------------------------------------
+
+def mark_attendance(student):
+
+    today = datetime.now().strftime(
+        "%Y-%m-%d"
+    )
+
+    current_time = datetime.now().strftime(
+        "%H:%M:%S"
+    )
+
+    already_present = False
+
+
+    # Check existing attendance
+    try:
+
+        with open(
+            ATTENDANCE_FILE,
+            "r",
+            newline="",
+            encoding="utf-8"
+        ) as f:
+
+            reader = csv.DictReader(f)
+
+            for row in reader:
+
+                if (
+                    row.get("Student ID")
+                    == student["student_id"]
+                    and
+                    row.get("Date")
+                    == today
+                ):
+
+                    already_present = True
+
+                    break
+
+    except FileNotFoundError:
+
+        pass
+
+
+    # Add attendance
+    if not already_present:
+
+        with open(
+            ATTENDANCE_FILE,
+            "a",
+            newline="",
+            encoding="utf-8"
+        ) as f:
+
+            writer = csv.writer(f)
+
+            writer.writerow([
+
+                student["name"],
+
+                student["student_id"],
+
+                student["department"],
+
+                today,
+
+                current_time,
+
+                "Present"
+            ])
+
+        print(
+            "\n✅ Attendance marked:",
+            student["name"]
+        )
+
+    else:
+
+        print(
+            "\nℹ️ Attendance already marked today:",
+            student["name"]
+        )
+
+
+# ------------------------------------------------------------
+# 10. GOOGLE COLAB CAMERA FUNCTION
+# ------------------------------------------------------------
+
+def take_photo():
+
+    print("\n📷 Starting browser camera...")
+    print(
+        "If Chrome asks for permission, click ALLOW."
+    )
+
+
+    js = Javascript("""
+    async function takePhoto() {
+
+        try {
+
+            // Check camera API
+            if (
+                !navigator.mediaDevices ||
+                !navigator.mediaDevices.getUserMedia
+            ) {
+
+                return "ERROR_BROWSER";
+            }
+
+
+            // Request camera
+            const stream =
+                await navigator.mediaDevices.getUserMedia({
+
+                    video: {
+                        facingMode: "user"
+                    },
+
+                    audio: false
+
+                });
+
+
+            // Create video
+            const video =
+                document.createElement("video");
+
+
+            video.style.width = "640px";
+
+            video.style.maxWidth = "100%";
+
+            video.style.display = "block";
+
+
+            document.body.appendChild(
+                video
+            );
+
+
+            video.srcObject =
+                stream;
+
+
+            await video.play();
+
+
+            // Wait for camera
+            await new Promise(
+                resolve =>
+                    setTimeout(
+                        resolve,
+                        1500
+                    )
+            );
+
+
+            // Create canvas
+            const canvas =
+                document.createElement(
+                    "canvas"
+                );
+
+
+            canvas.width =
+                video.videoWidth;
+
+            canvas.height =
+                video.videoHeight;
+
+
+            // Capture image
+            canvas
+                .getContext("2d")
+                .drawImage(
+                    video,
+                    0,
+                    0
+                );
+
+
+            // Stop camera
+            stream
+                .getTracks()
+                .forEach(
+                    track =>
+                        track.stop()
+                );
+
+
+            video.remove();
+
+
+            return canvas.toDataURL(
+                "image/jpeg"
+            );
+
+        }
+
+
+        catch(error) {
+
+            console.log(
+                "Camera error:",
+                error.name
+            );
+
+
+            if (
+                error.name ===
+                "NotAllowedError"
+            ) {
+
+                return "ERROR_PERMISSION";
+            }
+
+
+            if (
+                error.name ===
+                "PermissionDeniedError"
+            ) {
+
+                return "ERROR_PERMISSION";
+            }
+
+
+            if (
+                error.name ===
+                "NotFoundError"
+            ) {
+
+                return "ERROR_NO_CAMERA";
+            }
+
+
+            if (
+                error.name ===
+                "DevicesNotFoundError"
+            ) {
+
+                return "ERROR_NO_CAMERA";
+            }
+
+
+            if (
+                error.name ===
+                "NotReadableError"
+            ) {
+
+                return "ERROR_CAMERA_BUSY";
+            }
+
+
+            if (
+                error.name ===
+                "TrackStartError"
+            ) {
+
+                return "ERROR_CAMERA_BUSY";
+            }
+
+
+            if (
+                error.name ===
+                "SecurityError"
+            ) {
+
+                return "ERROR_SECURITY";
+            }
+
+
+            return "ERROR_UNKNOWN";
+        }
+    }
+
+
+    takePhoto();
+
+    """)
+
+
+    display(js)
+
+
+    # --------------------------------------------------------
+    # ASK BROWSER
+    # --------------------------------------------------------
+
+    try:
+
+        data = eval_js(
+            "takePhoto()"
+        )
+
+    except Exception as e:
+
+        error_text = str(e)
+
+        print("\n❌ CAMERA REQUEST FAILED")
+
+        print(
+            "Error:",
+            error_text
+        )
+
+        print("\nPossible solutions:")
+
+        print(
+            "1. Allow camera permission."
+        )
+
+        print(
+            "2. Refresh the Colab page."
+        )
+
+        print(
+            "3. Make sure another app is not using camera."
+        )
+
+        return None
+
+
+    # --------------------------------------------------------
+    # HANDLE PERMISSION ERROR
+    # --------------------------------------------------------
+
+    if data == "ERROR_PERMISSION":
+
+        print("\n" + "=" * 65)
+
+        print(
+            "❌ CAMERA PERMISSION DENIED"
+        )
+
+        print("=" * 65)
+
+        print("""
+Please do this:
+
+1. Browser address bar ke camera icon par click karein.
+2. Camera = Allow karein.
+3. Google Colab page refresh karein.
+4. Cell dobara run karein.
+5. Camera permission aaye to Allow karein.
+""")
+
+        return None
+
+
+    # --------------------------------------------------------
+    # NO CAMERA
+    # --------------------------------------------------------
+
+    if data == "ERROR_NO_CAMERA":
+
+        print("\n❌ CAMERA NOT FOUND")
+
+        print("""
+Please check:
+
+• Laptop/PC camera available hai.
+• Camera kisi aur application mein use nahi ho raha.
+• Browser ko camera access allowed hai.
+""")
+
+        return None
+
+
+    # --------------------------------------------------------
+    # CAMERA BUSY
+    # --------------------------------------------------------
+
+    if data == "ERROR_CAMERA_BUSY":
+
+        print("\n❌ CAMERA IS BUSY")
+
+        print("""
+Camera kisi doosri application ne use kiya hua hai.
+
+Close:
+• Zoom
+• Microsoft Teams
+• Google Meet
+• Windows Camera
+• Other webcam applications
+
+Then try again.
+""")
+
+        return None
+
+
+    # --------------------------------------------------------
+    # BROWSER ERROR
+    # --------------------------------------------------------
+
+    if data == "ERROR_BROWSER":
+
+        print("\n❌ BROWSER CAMERA API NOT AVAILABLE")
+
+        print("""
+Use an updated version of:
+
+• Google Chrome
+• Microsoft Edge
+
+Then refresh Google Colab.
+""")
+
+        return None
+
+
+    # --------------------------------------------------------
+    # SECURITY ERROR
+    # --------------------------------------------------------
+
+    if data == "ERROR_SECURITY":
+
+        print("\n❌ CAMERA SECURITY ERROR")
+
+        print("""
+Browser has blocked camera access.
+
+Make sure you are using Google Colab
+through HTTPS and camera permission is allowed.
+""")
+
+        return None
+
+
+    # --------------------------------------------------------
+    # UNKNOWN ERROR
+    # --------------------------------------------------------
+
+    if data == "ERROR_UNKNOWN":
+
+        print("\n❌ UNKNOWN CAMERA ERROR")
+
+        print(
+            "Camera image could not be captured."
+        )
+
+        return None
+
+
+    # --------------------------------------------------------
+    # CONVERT BASE64 TO IMAGE
+    # --------------------------------------------------------
+
+    try:
+
+        binary = b64decode(
+            data.split(",")[1]
+        )
+
+
+        image = np.frombuffer(
+            binary,
+            dtype=np.uint8
+        )
+
+
+        frame = cv2.imdecode(
+            image,
+            cv2.IMREAD_COLOR
+        )
+
+
+        if frame is None:
+
+            print(
+                "\n❌ Camera image could not be decoded."
+            )
+
+            return None
+
+
+        print(
+            "\n✅ Camera image captured successfully!"
+        )
+
+
+        return frame
+
+
+    except Exception as e:
+
+        print(
+            "\n❌ IMAGE PROCESSING ERROR"
+        )
+
+        print(
+            e
+        )
+
+        return None
+
+
+# ------------------------------------------------------------
+# 11. START CAMERA
+# ------------------------------------------------------------
+
+print("\n" + "=" * 65)
+
+print(
+    "CAMERA / FACE RECOGNITION"
+)
+
+print("=" * 65)
+
+
+frame = take_photo()
+
+
+# ------------------------------------------------------------
+# 12. STOP IF CAMERA FAILED
+# ------------------------------------------------------------
+
+if frame is None:
+
+    print("\nSystem stopped safely.")
+
+    print(
+        "Fix camera permission and run the cell again."
+    )
+
+
+else:
+
+    # --------------------------------------------------------
+    # FACE DETECTION
+    # --------------------------------------------------------
+
+    rgb_frame = cv2.cvtColor(
+        frame,
+        cv2.COLOR_BGR2RGB
+    )
+
+
+    face_locations = (
+        face_recognition.face_locations(
+            rgb_frame
+        )
+    )
+
+
+    face_encodings = (
+        face_recognition.face_encodings(
+            rgb_frame,
+            face_locations
+        )
+    )
+
+
+    print(
+        "\nFaces detected:",
+        len(face_locations)
+    )
+
+
+    # --------------------------------------------------------
+    # PROCESS EACH FACE
+    # --------------------------------------------------------
+
+    for face_encoding, location in zip(
+        face_encodings,
+        face_locations
+    ):
+
+
+        # Default
+        name_text = "Unknown"
+
+        id_text = "ID: Unknown"
+
+        dept_text = "Department: Unknown"
+
+        status_text = "Not Registered"
+
+
+        # ----------------------------------------------------
+        # FACE MATCH
+        # ----------------------------------------------------
+
+        if len(known_encodings) > 0:
+
+
+            distances = (
+                face_recognition.face_distance(
+                    known_encodings,
+                    face_encoding
+                )
+            )
+
+
+            best_index = np.argmin(
+                distances
+            )
+
+
+            # Recognition threshold
+            if (
+                distances[best_index]
+                < 0.50
+            ):
+
+
+                student = (
+                    known_students[
+                        best_index
+                    ]
+                )
+
+
+                name_text = (
+                    student["name"]
+                )
+
+
+                id_text = (
+                    "ID: "
+                    + student["student_id"]
+                )
+
+
+                dept_text = (
+                    "Department: "
+                    + student["department"]
+                )
+
+
+                status_text = (
+                    "Registered"
+                )
+
+
+                # Mark attendance
+                mark_attendance(
+                    student
+                )
+
+
+        # ----------------------------------------------------
+        # FACE COORDINATES
+        # ----------------------------------------------------
+
+        top, right, bottom, left = (
+            location
+        )
+
+
+        # ----------------------------------------------------
+        # FACE BOX
+        # ----------------------------------------------------
+
+        cv2.rectangle(
+
+            frame,
+
+            (left, top),
+
+            (right, bottom),
+
+            (0, 255, 0),
+
+            3
+
+        )
+
+
+        # ----------------------------------------------------
+        # NAME
+        # ----------------------------------------------------
+
+        cv2.putText(
+
+            frame,
+
+            name_text,
+
+            (left, max(30, top - 45)),
+
+            cv2.FONT_HERSHEY_SIMPLEX,
+
+            0.75,
+
+            (0, 255, 0),
+
+            2
+
+        )
+
+
+        # ----------------------------------------------------
+        # STUDENT ID
+        # ----------------------------------------------------
+
+        cv2.putText(
+
+            frame,
+
+            id_text,
+
+            (left, bottom + 25),
+
+            cv2.FONT_HERSHEY_SIMPLEX,
+
+            0.60,
+
+            (0, 255, 0),
+
+            2
+
+        )
+
+
+        # ----------------------------------------------------
+        # DEPARTMENT
+        # ----------------------------------------------------
+
+        cv2.putText(
+
+            frame,
+
+            dept_text,
+
+            (left, bottom + 50),
+
+            cv2.FONT_HERSHEY_SIMPLEX,
+
+            0.55,
+
+            (0, 255, 0),
+
+            2
+
+        )
+
+
+        # ----------------------------------------------------
+        # STATUS
+        # ----------------------------------------------------
+
+        cv2.putText(
+
+            frame,
+
+            status_text,
+
+            (left, bottom + 75),
+
+            cv2.FONT_HERSHEY_SIMPLEX,
+
+            0.55,
+
+            (0, 255, 0),
+
+            2
+
+        )
+
+
+    # --------------------------------------------------------
+    # SHOW RESULT
+    # --------------------------------------------------------
+
+    print("\n" + "=" * 65)
+
+    print(
+        "CAMERA RESULT"
+    )
+
+    print("=" * 65)
+
+
+    if len(face_locations) == 0:
+
+        print(
+            "No face detected."
+        )
+
+
+    cv2_imshow(
+        frame
+    )
+
+
+# ------------------------------------------------------------
+# 13. SHOW ATTENDANCE
+# ------------------------------------------------------------
+
+print("\n" + "=" * 65)
+
+print(
+    "ATTENDANCE RECORD"
+)
+
+print("=" * 65)
+
+
+try:
+
+    attendance = pd.read_csv(
+        ATTENDANCE_FILE
+    )
+
+
+    if len(attendance) == 0:
+
+        print(
+            "No attendance records yet."
+        )
+
+    else:
+
+        display(
+            attendance
+        )
+
+
+except Exception as e:
+
+    print(
+        "Could not read attendance file:",
+        e
+    )
+
+
+# ------------------------------------------------------------
+# 14. DOWNLOAD ATTENDANCE
+# ------------------------------------------------------------
+
+print("\n" + "=" * 65)
+
+print(
+    "PROJECT COMPLETE"
+)
+
+print("=" * 65)
+
+print("""
+Files created:
+
+✓ students.json
+✓ attendance.csv
+✓ student_faces/
+
+To download attendance.csv, run:
+
+files.download("attendance.csv")
+""")
